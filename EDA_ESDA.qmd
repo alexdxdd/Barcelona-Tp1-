@@ -1,0 +1,358 @@
+# EDA introductorio (no espacial) — Airbnb Barcelona, ​​Cataluña, España
+# Distritos (group) y barrios
+# EDA Reconocimiento
+
+```{r}
+# Carga de paquetes
+
+library(knitr)
+library(DT)
+library(ggplot2)
+library(plotly)
+library(httr)
+library(dplyr)
+library(e1071)
+library(sf)
+library(leaflet.extras)
+library(manipulateWidget)
+library(slider)
+```
+ 
+```{r}
+# Carga de datos y representación
+
+datos <-
+  read.csv("https://raw.githubusercontent.com/alexdxdd/Barcelona-Tp1-/refs/heads/main/Barcelona%20Tp1.csv")
+
+head(datos)
+```
+ 
+```{r}
+# Que tipo de datos tiene cada columna
+
+str(datos)
+```
+ 
+```{r}
+# Periodo
+
+min(datos$last_review, na.rm = TRUE)
+max(datos$last_review, na.rm = TRUE)
+```
+ 
+```{r}
+# Cantidad de nulos
+
+sum(duplicated(datos))
+
+sum(is.na(datos))
+colSums(is.na(datos))
+
+datos$last_review <- 
+  as.Date(datos$last_review)
+
+class(datos$last_review)
+```
+ 
+```{r}
+# Duplicados
+
+datos <- 
+  datos |>
+  filter(!is.na(price))
+
+sum(is.na(datos$price))
+```
+ 
+```{r}
+# Histograma y gráfico de cajas
+
+hist(datos$price,
+     main = "Histograma de precios",
+     xlab = "Precio",
+     ylab = "Frecuencia")
+
+boxplot(datos$price,
+     main = "Boxplot de precios",
+     xlab = "Precio"
+     )
+```
+ 
+```{r}
+# mínimos y másximos en el precio
+
+min(datos$price, na.rm = TRUE)
+max(datos$price, na.rm = TRUE)
+```
+ 
+```{r}
+# Datos logarítmicos
+
+datos$log_price <-
+  log(datos$price)
+
+summary(datos$log_price)
+```
+ 
+```{r}
+#Comparativa precios original y logaritmicos
+
+hist(datos$price,
+     main = "Histograma de precios (original)",
+     xlab = "Precio",
+     ylab = "Frecuencia")
+
+
+hist(datos$log_price,
+     main = "Histograma de precios (crudo)",
+     xlab = "Precio Log",
+     ylab = "Frecuencia")
+```
+
+```{r}
+# Percentil 99
+
+p99 <-
+  quantile(datos$price, 0.99, na.rm = TRUE)
+
+# Imprimir resultados
+cat("Percentil 99 del precio:", round(p99, 2), "\n")
+cat("Precio máximo:", max(datos$price, na.rm = TRUE), "\n")
+
+# cat("Relación max / p99:", round(max(datos$price, na.rm = TRUE) / p99, 2), "\n")
+```
+
+ 
+```{r}
+# Evidencia cuantitativa de asimetría
+
+# Media, mediana y asimetría
+mean_price <-
+  mean(datos$price, na.rm = TRUE)
+
+median_price <-
+  median(datos$price, na.rm = TRUE)
+
+skew_price <-
+  skewness(datos$price, na.rm = TRUE)
+
+cat("Media:", round(mean_price, 2), "\n")
+cat("Mediana:", round(median_price, 2), "\n")
+cat("Asimetría (skewness):", round(skew_price, 2), "\n")
+cat("Relación media / mediana:", round(mean_price / median_price, 2), "\n")
+```
+ 
+```{r}
+# Percentiles 99
+p99_price <-
+  quantile(datos$price, 0.99, na.rm = TRUE)
+
+p99_min_nights <-
+  quantile(datos$minimum_nights, 0.99, na.rm = TRUE)
+
+# Copiar dataframe
+df_clean <-
+  datos
+
+# Aplicar "capping" (winsorización superior)
+df_clean$price_capped <-
+  pmin(df_clean$price, p99_price)
+
+df_clean$minimum_nights_capped <-
+  pmin(df_clean$minimum_nights, p99_min_nights)
+
+# Resumen descriptivo
+summary(df_clean[, c("price", "price_capped", "minimum_nights", "minimum_nights_capped")])
+```
+ 
+```{r}
+# Precio por tipo de habitación
+
+ggplot(df_clean, aes(x = room_type, y = price_capped)) +
+  geom_boxplot() +
+  labs(
+    title = "Precio por tipo de habitación",
+    x = "Tipo de habitación",
+    y = "Precio (capped p99)"
+  ) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+```
+ 
+```{r}
+# Convertir a objeto espacial (sf)
+
+# Definir nombres de columnas para latitud y longitud
+
+gdf_airbnb <- st_as_sf(
+  datos,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE   # 🔥 CLAVE
+)
+
+cat("\nGeoDataFrame Airbnb ✅\n")
+cat("CRS:", st_crs(gdf_airbnb)$input, "\n")
+
+# Mostrar primeras filas de las coordenadas
+print(head(st_coordinates(gdf_airbnb), 3))
+```
+ 
+```{r}
+# Mapa de puntos
+
+mapa_puntos <-
+  leaflet(datos) |>
+  addProviderTiles(providers$Esri.WorldTopoMap)|>
+  addCircleMarkers(
+    lng = ~longitude,
+    lat = ~latitude,
+    popup = ~paste(
+      "Precio:", price, "<br>",
+      "Tipo:", room_type
+    ),
+    radius = 0.5
+  )
+
+mapa_puntos
+
+```
+ 
+```{r}
+# visualización espacial del precio
+
+pal <-
+  colorNumeric("viridis", domain = gdf_airbnb$price)
+
+leaflet(gdf_airbnb) |>
+  addTiles() |>
+  addCircleMarkers(
+    color = ~pal(price),
+    radius = 2,
+    popup = ~paste(
+      "Precio:", p99, "<br>",
+      "Tipo de habitación:", room_type
+    )
+  ) |>
+  addLegend(pal = pal, values = ~price, title = "Precio")
+```
+ 
+```{r}
+# Mapa interactivo
+
+# Rango tipo percentiles
+p_min <- quantile(gdf_airbnb$price, 0.01, na.rm = TRUE)
+p_max <- quantile(gdf_airbnb$price, 0.99, na.rm = TRUE)
+
+mapa_interactivo <- 
+  function(price_range, log_color = FALSE) {
+  
+  lo <- price_range[1]
+  hi <- price_range[2]
+  
+  d <- gdf_airbnb |>
+    filter(price >= lo, price <= hi) |>
+    filter(!is.na(latitude), !is.na(longitude), !is.na(price))
+  
+  if(nrow(d) == 0){
+    plotly_empty() |> layout(title = "No hay datos en ese rango")
+    return()
+  }
+  
+  if(log_color){
+    d$price_color <- log1p(d$price)
+    color_col <- d$price_color
+    color_title <- "log1p(price)"
+  } else {
+    color_col <- d$price
+    color_title <- "price"
+  }
+  
+  plot_ly(
+    data = d,
+    type = "scattermapbox",
+    mode = "markers",
+    lat = ~latitude,
+    lon = ~longitude,
+    marker = list(
+      color = color_col,
+      colorscale = "Viridis",
+      showscale = TRUE,
+      opacity = 0.55
+    ),
+    text = ~paste(
+      "Price:", price, "<br>",
+      "Tipo de habitación:", room_type, "<br>",
+      "Barrio:", neighbourhood
+    ),
+    hoverinfo = "text"
+  ) |>
+    layout(
+      mapbox = list(
+        style = "carto-positron",
+        zoom = 11
+      ),
+      margin = list(r = 0, t = 0, l = 0, b = 0)
+    )
+}
+
+# Interfaz interactiva
+manipulateWidget(
+  make_map(
+    price_range = c(price_min, price_max),
+    log_color = log_color
+  ),
+  price_min = slider(min(gdf_airbnb$price, na.rm = TRUE),
+                     max(gdf_airbnb$price, na.rm = TRUE),
+                     initial = p_min),
+  
+  price_max = slider(min(gdf_airbnb$price, na.rm = TRUE),
+                     max(gdf_airbnb$price, na.rm = TRUE),
+                     initial = p_max),
+  
+  log_color = checkbox(FALSE, "Usar log1p(price)")
+)
+
+mapa_interactivo
+
+```
+ 
+ 
+```{r}
+# Mapa de calor
+
+leaflet(gdf_airbnb) |>
+  addProviderTiles(providers$OpenTopoMap) |>
+  addHeatmap(
+    intensity = ~p99,
+    radius = 12,
+    blur = 15
+  )
+```
+ 
+```{r}
+# Gráfico de barras nuevo: top 10 barrios por precio mediano
+
+top_barrios <-
+  df_clean |>
+  group_by(neighbourhood) |>
+  summarise(
+    mediana_precio = median(price_capped, na.rm = TRUE),
+    n = n()
+  ) |>
+  arrange(desc(mediana_precio)) |>
+  slice_head(n = 10)
+
+# Gráfico
+ggplot(top_barrios, aes(x = reorder(neighbourhood, mediana_precio),
+                        y = mediana_precio)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 10 barrios por precio mediano",
+    x = "Barrio",
+    y = "Precio mediano (capped p99)"
+  )
+```
+ 
+# Explicación
+## Con el gráfico hecho, se puede ver que hay una coincidencia parcial, los primeros 3 si coinciden ya que son barrios céntricos, cercanos a la costa y en zonas turísticas, en contraste con esto tenemos al quinto barrio "Vilapicina i la Torre Llobeta" el cual no es uuna zona típicamente "cara". Esto nos sugiere que los datos de Airbnb no reflejan exactamente la estructura social o económica.
